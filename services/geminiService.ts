@@ -1,23 +1,19 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
-import { SongMetadata, VoiceSettings } from "../types";
+import { GoogleGenAI, Type, Modality } from "@google/genai";
+import { SongMetadata } from "../types";
 
 export const generateSongStructure = async (
   prompt: string, 
-  genre: string, 
-  customLyrics?: string
+  genre: string
 ): Promise<SongMetadata> => {
   // @ts-ignore
   const apiKey = process.env.API_KEY;
-  if (!apiKey) throw new Error("Chưa cấu hình API_KEY!");
+  if (!apiKey) throw new Error("API_KEY is missing!");
 
   const ai = new GoogleGenAI({ apiKey });
   
-  const instruction = customLyrics 
-    ? `Dựa trên lời bài hát: "${customLyrics}", hãy phân tích cảm xúc và đặt tiêu đề phù hợp với thể loại "${genre}". Trả về JSON.`
-    : `Hãy viết lời bài hát chủ đề: "${prompt}", thể loại: "${genre}". 
-       YÊU CẦU: Chia rõ [Verse], [Chorus], [Bridge]. 
-       Mỗi câu hát phải có nhịp điệu. Trả về JSON.`;
+  const instruction = `Bạn là chuyên gia sáng tác nhạc. Hãy viết lời bài hát cho chủ đề: "${prompt}" với phong cách "${genre}". 
+  YÊU CẦU: Chia rõ [Verse 1], [Chorus], [Verse 2], [Bridge], [Outro]. Trả về định dạng JSON chuẩn.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -39,16 +35,10 @@ export const generateSongStructure = async (
       }
     });
 
-    const result = response.text;
-    if (!result) throw new Error("AI không phản hồi lời bài hát.");
-    
-    const parsed = JSON.parse(result);
-    if (customLyrics) parsed.lyrics = customLyrics;
-    
-    return parsed as SongMetadata;
+    return JSON.parse(response.text) as SongMetadata;
   } catch (error) {
-    console.error("Lỗi tạo lời:", error);
-    throw error;
+    console.error("Lyrics Error:", error);
+    throw new Error("Lỗi khi tạo lời bài hát.");
   }
 };
 
@@ -62,57 +52,48 @@ export const generateSpeechAudio = async (
 
   const ai = new GoogleGenAI({ apiKey });
   
-  // Prompt yêu cầu model Gemini hất/đọc theo giai điệu
-  const prompt = `Hãy đóng vai một ca sĩ chuyên nghiệp thể loại ${genre}. 
-    HÃY HÁT thật truyền cảm lời bài hát sau đây. 
-    Lưu ý: Ngắt nghỉ đúng nhịp điệu, có luyến láy và biểu cảm:
-    
-    ${text.substring(0, 500)}`;
+  // Chỉ dẫn cho model TTS thực hiện bài hát
+  const ttsPrompt = `Hãy hát hoặc đọc lời bài hát này một cách đầy cảm xúc theo phong cách ${genre}. 
+  Nhấn nhá vào các đoạn điệp khúc, ngắt nghỉ đúng nhịp điệu âm nhạc:
+  
+  ${text.substring(0, 800)}`;
 
   try {
-    // QUAN TRỌNG: Phải có responseModalities để model trả về Audio
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-native-audio-preview-12-2025',
-      contents: [{ parts: [{ text: prompt }] }],
+      model: "gemini-2.5-flash-preview-tts",
+      contents: [{ parts: [{ text: ttsPrompt }] }],
       config: {
         // @ts-ignore
-        responseModalities: ['AUDIO'],
+        responseModalities: [Modality.AUDIO],
         speechConfig: {
             voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: 'Kore' } // 'Kore' hoặc 'Puck' thường có tông giọng tốt
-            }
-        }
-      }
+              prebuiltVoiceConfig: { voiceName: 'Kore' }, // Kore có tông giọng rất tốt cho nhạc
+            },
+        },
+      },
     });
 
-    // Trích xuất dữ liệu âm thanh
-    const part = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
-    if (!part || !part.inlineData) {
-        console.warn("Model không trả về dữ liệu audio trực tiếp, thử lấy từ text (nếu có)");
-        return null;
-    }
+    const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (!audioData) return null;
 
-    const binaryString = atob(part.inlineData.data);
+    const binaryString = atob(audioData);
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
       bytes[i] = binaryString.charCodeAt(i);
     }
     return bytes;
   } catch (error) {
-    console.error("Lỗi nghiêm trọng trong generateSpeechAudio:", error);
+    console.error("Vocal Error:", error);
     return null;
   }
 };
 
-// Hàm chuyển đổi PCM (thường là 24kHz từ Gemini) sang WAV
 export const pcmToWav = (pcmData: Int16Array, sampleRate: number): Blob => {
   const buffer = new ArrayBuffer(44 + pcmData.length * 2);
   const view = new DataView(buffer);
   
-  const writeString = (offset: number, string: string) => {
-    for (let i = 0; i < string.length; i++) {
-      view.setUint8(offset + i, string.charCodeAt(i));
-    }
+  const writeString = (offset: number, s: string) => {
+    for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i));
   };
 
   writeString(0, 'RIFF');
@@ -129,8 +110,8 @@ export const pcmToWav = (pcmData: Int16Array, sampleRate: number): Blob => {
   writeString(36, 'data');
   view.setUint32(40, pcmData.length * 2, true);
 
-  for (let i = 0, offset = 44; i < pcmData.length; i++, offset += 2) {
-    view.setInt16(offset, pcmData[i], true);
+  for (let i = 0; i < pcmData.length; i++) {
+    view.setInt16(44 + i * 2, pcmData[i], true);
   }
 
   return new Blob([view], { type: 'audio/wav' });
