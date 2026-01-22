@@ -6,13 +6,15 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   define: {
-    // Đảm bảo process.env.API_KEY có thể hoạt động trong môi trường trình duyệt
-    'process.env': process.env
+    'process.env': {
+      API_KEY: process.env.API_KEY
+    }
   },
-  // Nếu bạn đặt tên repo GitHub khác với root, hãy đổi base này thành '/ten-repo/'
-  base: './', 
+  // Tên repository của bạn là melodify-ai
+  base: '/melodify-ai/', 
   build: {
     outDir: 'dist',
+    assetsDir: 'assets',
     sourcemap: false
   }
 });
