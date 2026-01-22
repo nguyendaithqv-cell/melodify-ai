@@ -6,15 +6,15 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   define: {
-    // Inject API_KEY vào mã nguồn trong quá trình build
-    'process.env.API_KEY': JSON.stringify(process.env.API_KEY)
+    // Inject API_KEY từ môi trường build vào ứng dụng
+    'process.env.API_KEY': JSON.stringify(process.env.API_KEY || '')
   },
-  // Base path khớp với tên repository GitHub
+  // Base path phải khớp với tên dự án trên GitHub Pages
   base: '/melodify-ai/', 
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
+    emptyOutDir: true,
     sourcemap: false
-    // Đã xóa minify: 'terser' để dùng mặc định (esbuild) - tránh lỗi thiếu thư viện terser
   }
 });
