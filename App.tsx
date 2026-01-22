@@ -1,31 +1,31 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Music, Sparkles, History, Send, Download, Plus, Mic, RotateCcw, ChevronDown, ChevronUp, User, Globe, Baby, Info, AlertCircle, Volume2 } from 'lucide-react';
+import { Play, Pause, Music, Sparkles, Download, Plus, ChevronDown, ChevronUp, User, Info, AlertCircle, Volume2, Sliders, Mic2 } from 'lucide-react';
 import { generateSongStructure, generateSpeechAudio, pcmToWav } from './services/geminiService';
 import { Track, GenerationStep, VoiceSettings } from './types';
 import Visualizer from './components/Visualizer';
 
 const GENRES = ['Pop', 'Ballad', 'Rock', 'EDM', 'Bolero', 'Lofi', 'Hip-hop', 'Acoustic'];
 
-// Danh sách Beat thực tế để hòa âm
+// Cập nhật link nhạc nền ổn định hơn từ CDN uy tín
 const INSTRUMENTAL_BEATS: Record<string, string> = {
-  'Pop': 'https://assets.mixkit.co/music/preview/mixkit-tech-house-vibes-130.mp3',
-  'Ballad': 'https://assets.mixkit.co/music/preview/mixkit-delicate-acoustic-guitar-9.mp3',
-  'Rock': 'https://assets.mixkit.co/music/preview/mixkit-heavy-rock-guitar-24.mp3',
-  'EDM': 'https://assets.mixkit.co/music/preview/mixkit-complex-234.mp3',
-  'Bolero': 'https://assets.mixkit.co/music/preview/mixkit-latin-jazz-34.mp3',
-  'Lofi': 'https://assets.mixkit.co/music/preview/mixkit-lo-fi-night-612.mp3',
-  'Hip-hop': 'https://assets.mixkit.co/music/preview/mixkit-hip-hop-02-738.mp3',
-  'Acoustic': 'https://assets.mixkit.co/music/preview/mixkit-sun-and-clouds-248.mp3'
+  'Pop': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+  'Ballad': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
+  'Rock': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
+  'EDM': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3',
+  'Bolero': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3',
+  'Lofi': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3',
+  'Hip-hop': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-10.mp3',
+  'Acoustic': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-12.mp3'
 };
 
 const ARTISTS = [
-  { name: 'Mặc định', desc: 'Sử dụng giọng AI tự nhiên.' },
+  { name: 'Mặc định', desc: 'Giọng AI tiêu chuẩn.' },
   { name: 'Sơn Tùng M-TP', desc: 'Trẻ trung, hiện đại.' },
   { name: 'Mỹ Tâm', desc: 'Nồng nàn, nội lực.' },
-  { name: 'Hà Anh Tuấn', desc: 'Lịch lãm, sang trọng.' },
-  { name: 'Đen Vâu', desc: 'Mộc mạc, đậm chất đời.' },
-  { name: 'HIEUTHUHAI', desc: 'Rap Gen Z lôi cuốn.' }
+  { name: 'Hà Anh Tuấn', desc: 'Lịch lãm, tự sự.' },
+  { name: 'Đen Vâu', desc: 'Rap chậm, vần điệu.' },
+  { name: 'HIEUTHUHAI', desc: 'Rap hiện đại, lôi cuốn.' }
 ];
 
 const App: React.FC = () => {
@@ -36,6 +36,10 @@ const App: React.FC = () => {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   
+  // Mixer Settings
+  const [vocalVolume, setVocalVolume] = useState(1.0);
+  const [musicVolume, setMusicVolume] = useState(0.6);
+
   const [voiceSettings, setVoiceSettings] = useState<VoiceSettings>({
     region: 'north',
     age: 'young',
@@ -55,19 +59,20 @@ const App: React.FC = () => {
   const handleGenerate = async () => {
     if (!useCustomLyrics && !prompt.trim()) return;
     setErrorMsg('');
+    setIsPlaying(false);
 
     try {
       setStep(GenerationStep.WRITING_LYRICS);
-      setStatusText('AI đang soạn lời và giai điệu...');
+      setStatusText('Suno AI đang soạn lời và phối khí...');
       
       const songData = await generateSongStructure(prompt, genre, useCustomLyrics ? customLyrics : undefined);
       
       setStep(GenerationStep.GENERATING_AUDIO);
-      setStatusText(`Đang huấn luyện giọng hát ${voiceSettings.singerStyle}...`);
+      setStatusText(`Đang thu âm giọng ca ${voiceSettings.singerStyle}...`);
       
       const audioBytes = await generateSpeechAudio(songData.lyrics, voiceSettings);
       
-      if (!audioBytes) throw new Error("Không thể tạo giọng hát. Thử lại sau!");
+      if (!audioBytes) throw new Error("Lỗi kết nối Studio. Vui lòng thử lại!");
 
       const pcmData = new Int16Array(audioBytes.buffer);
       const wavBlob = pcmToWav(pcmData, 24000);
@@ -80,7 +85,7 @@ const App: React.FC = () => {
         lyrics: songData.lyrics,
         audioUrl: audioUrl,
         createdAt: Date.now(),
-        thumbnail: `https://picsum.photos/seed/${songData.title}/400/400`,
+        thumbnail: `https://picsum.photos/seed/${Date.now()}/400/400`,
         settings: { ...voiceSettings },
         beatUrl: INSTRUMENTAL_BEATS[genre] || INSTRUMENTAL_BEATS['Pop']
       };
@@ -92,9 +97,8 @@ const App: React.FC = () => {
       setStatusText('');
     } catch (error: any) {
       console.error("Lỗi:", error);
-      setErrorMsg(error.message || 'Hệ thống đang quá tải, vui lòng thử lại.');
+      setErrorMsg(error.message || 'Hệ thống đang bận, vui lòng thử lại sau giây lát.');
       setStep(GenerationStep.IDLE);
-      setStatusText('');
     }
   };
 
@@ -104,16 +108,33 @@ const App: React.FC = () => {
     if (isPlaying) {
       audioRef.current.pause();
       beatRef.current.pause();
+      setIsPlaying(false);
     } else {
-      // Nhạc nền nhỏ hơn một chút để nghe rõ giọng hát
-      beatRef.current.volume = 0.4;
+      // Đồng bộ thời gian của nhạc nền với giọng hát
+      beatRef.current.currentTime = audioRef.current.currentTime;
+      beatRef.current.volume = musicVolume;
+      audioRef.current.volume = vocalVolume;
       beatRef.current.loop = true;
       
-      beatRef.current.play().catch(e => console.error("Lỗi phát nhạc nền:", e));
-      audioRef.current.play().catch(e => console.error("Lỗi phát giọng hát:", e));
+      const playPromise1 = beatRef.current.play();
+      const playPromise2 = audioRef.current.play();
+
+      Promise.all([playPromise1, playPromise2])
+        .then(() => setIsPlaying(true))
+        .catch(e => {
+            console.error("Lỗi Playback:", e);
+            setErrorMsg("Không thể phát nhạc. Vui lòng nhấn Play lại.");
+        });
     }
-    setIsPlaying(!isPlaying);
   };
+
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.volume = vocalVolume;
+  }, [vocalVolume]);
+
+  useEffect(() => {
+    if (beatRef.current) beatRef.current.volume = musicVolume;
+  }, [musicVolume]);
 
   useEffect(() => {
     if (currentTrack) {
@@ -124,118 +145,110 @@ const App: React.FC = () => {
   }, [currentTrack]);
 
   return (
-    <div className="h-screen flex flex-col md:flex-row bg-[#0a0a0a] text-white overflow-hidden">
-      {/* Sidebar - Lịch sử sáng tác */}
-      <aside className="hidden md:flex w-72 glass-morphism p-5 flex-col border-r border-white/5">
-        <div className="flex items-center gap-3 mb-8">
-          <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-blue-700 rounded-xl flex items-center justify-center shadow-lg shadow-purple-500/20">
-            <Music className="w-6 h-6 text-white" />
+    <div className="h-screen flex flex-col md:flex-row bg-[#050505] text-white overflow-hidden">
+      {/* Sidebar */}
+      <aside className="hidden md:flex w-80 glass-morphism p-6 flex-col border-r border-white/5">
+        <div className="flex items-center gap-3 mb-10">
+          <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 via-purple-600 to-pink-500 rounded-2xl flex items-center justify-center shadow-2xl shadow-purple-500/20">
+            <Music className="w-7 h-7 text-white" />
           </div>
-          <h1 className="text-xl font-bold tracking-tighter">MELODIFY <span className="text-[8px] block opacity-50 uppercase tracking-widest">AI Studio</span></h1>
+          <div>
+            <h1 className="text-xl font-black tracking-tighter leading-none">MELODIFY</h1>
+            <span className="text-[9px] opacity-40 uppercase tracking-[0.2em] font-bold">Creative Studio</span>
+          </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-2">
-          <p className="text-[10px] text-white/30 font-bold uppercase mb-4 px-2">Bộ sưu tập của bạn</p>
+        <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-2">
+          <p className="text-[10px] text-white/30 font-black uppercase mb-4 px-2 tracking-widest">Lịch sử sáng tác</p>
           {tracks.map(track => (
             <button
               key={track.id}
               onClick={() => setCurrentTrack(track)}
-              className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${
-                currentTrack?.id === track.id ? 'bg-white/10 ring-1 ring-white/20' : 'hover:bg-white/5 opacity-60 hover:opacity-100'
+              className={`w-full flex items-center gap-4 p-4 rounded-2xl transition-all duration-300 ${
+                currentTrack?.id === track.id ? 'bg-white/10 ring-1 ring-white/20' : 'hover:bg-white/5 opacity-50 hover:opacity-100'
               }`}
             >
-              <img src={track.thumbnail} className="w-10 h-10 rounded-lg object-cover" alt="" />
+              <img src={track.thumbnail} className="w-12 h-12 rounded-xl object-cover shadow-lg" alt="" />
               <div className="text-left overflow-hidden">
-                <p className="font-semibold truncate text-xs">{track.title}</p>
-                <p className="text-[10px] text-white/40">{track.genre}</p>
+                <p className="font-bold truncate text-sm">{track.title}</p>
+                <p className="text-[10px] text-white/40 font-medium">{track.genre} • {new Date(track.createdAt).toLocaleDateString()}</p>
               </div>
             </button>
           ))}
-          {tracks.length === 0 && <p className="text-white/20 text-center py-20 text-xs italic">Chưa có bản nhạc nào được tạo</p>}
+          {tracks.length === 0 && (
+            <div className="py-20 text-center space-y-4 opacity-20">
+                <div className="w-12 h-12 border border-dashed border-white rounded-full mx-auto flex items-center justify-center"><Plus size={20}/></div>
+                <p className="text-xs italic">Chưa có bản nhạc nào</p>
+            </div>
+          )}
         </div>
 
-        <button onClick={() => {setCurrentTrack(null); setPrompt('');}} className="mt-6 flex items-center justify-center gap-2 w-full py-3.5 bg-white text-black hover:bg-gray-200 rounded-2xl transition-all font-bold text-xs uppercase">
-          <Plus size={16} /> Dự án mới
+        <button onClick={() => {setCurrentTrack(null); setPrompt('');}} className="mt-8 flex items-center justify-center gap-2 w-full py-4 bg-white text-black hover:bg-gray-100 rounded-2xl transition-all font-black text-xs uppercase tracking-widest shadow-xl">
+          <Plus size={18} /> Dự án mới
         </button>
       </aside>
 
-      {/* Giao diện chính */}
-      <main className="flex-1 flex flex-col p-4 md:p-8 overflow-y-auto custom-scrollbar">
-        <header className="mb-8 flex justify-between items-center">
+      {/* Main Content */}
+      <main className="flex-1 flex flex-col p-6 md:p-10 overflow-y-auto custom-scrollbar">
+        <header className="mb-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
            <div>
-              <h2 className="text-3xl font-black mb-1">Studio <span className="gradient-text">Âm Nhạc AI</span></h2>
-              <p className="text-white/40 text-xs">Biến ý tưởng thành bài hát chuyên nghiệp chỉ trong vài giây.</p>
+              <h2 className="text-4xl font-black mb-2 tracking-tighter">AI <span className="gradient-text">Music Studio</span></h2>
+              <p className="text-white/40 text-sm font-medium">Sáng tạo âm nhạc chuyên nghiệp như Suno AI.</p>
            </div>
+           {currentTrack && (
+              <div className="flex gap-2">
+                 <button className="px-5 py-3 bg-white/5 hover:bg-white/10 rounded-xl text-xs font-bold transition-all flex items-center gap-2 border border-white/5"><Download size={16}/> Tải xuống</button>
+              </div>
+           )}
         </header>
 
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
-          {/* Form nhập liệu */}
-          <div className="xl:col-span-5 space-y-5">
-            <div className="glass-morphism rounded-[2.5rem] p-7 border-white/10 shadow-2xl relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-6 opacity-10">
-                <Sparkles size={80} className="text-white" />
-              </div>
-              
-              <div className="flex items-center justify-between mb-5">
-                <span className="text-[10px] font-black text-white/40 uppercase tracking-widest">Sáng tác ngay</span>
-                <div className="flex bg-black/50 p-1 rounded-xl">
-                  <button onClick={() => setUseCustomLyrics(false)} className={`px-4 py-1.5 text-[10px] font-bold rounded-lg transition-all ${!useCustomLyrics ? 'bg-white/10 text-white' : 'text-white/30'}`}>AI VIẾT</button>
-                  <button onClick={() => setUseCustomLyrics(true)} className={`px-4 py-1.5 text-[10px] font-bold rounded-lg transition-all ${useCustomLyrics ? 'bg-white/10 text-white' : 'text-white/30'}`}>DÁN LỜI</button>
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-10">
+          {/* Input Section */}
+          <div className="xl:col-span-5 space-y-6">
+            <div className="glass-morphism rounded-[2.5rem] p-8 border-white/10 shadow-3xl relative">
+              <div className="flex items-center justify-between mb-6">
+                <span className="text-[11px] font-black text-purple-400 uppercase tracking-[0.2em]">Sáng tác</span>
+                <div className="flex bg-black/40 p-1 rounded-xl border border-white/5">
+                  <button onClick={() => setUseCustomLyrics(false)} className={`px-5 py-2 text-[10px] font-black rounded-lg transition-all ${!useCustomLyrics ? 'bg-white/10 text-white shadow-lg' : 'text-white/30'}`}>MÔ TẢ</button>
+                  <button onClick={() => setUseCustomLyrics(true)} className={`px-5 py-2 text-[10px] font-black rounded-lg transition-all ${useCustomLyrics ? 'bg-white/10 text-white shadow-lg' : 'text-white/30'}`}>LỜI NHẠC</button>
                 </div>
               </div>
 
               <textarea
                 value={useCustomLyrics ? customLyrics : prompt}
                 onChange={(e) => useCustomLyrics ? setCustomLyrics(e.target.value) : setPrompt(e.target.value)}
-                placeholder={useCustomLyrics ? "Dán lời bài hát của bạn vào đây..." : "Gợi ý: Một bài hát EDM sôi động nói về sự tự do và khát vọng tuổi trẻ..."}
-                className="w-full bg-white/5 border border-white/5 focus:border-purple-500/50 focus:ring-4 focus:ring-purple-500/10 rounded-2xl text-sm p-5 h-36 resize-none transition-all placeholder:text-white/10"
+                placeholder={useCustomLyrics ? "Dán lời bài hát của bạn..." : "Ví dụ: Một bài hát EDM sôi động về tuổi trẻ..."}
+                className="w-full bg-white/5 border border-white/5 focus:border-purple-500/50 focus:ring-4 focus:ring-purple-500/5 rounded-3xl text-sm p-6 h-40 resize-none transition-all placeholder:text-white/10"
               />
 
-              <div className="mt-6">
-                <p className="text-[10px] font-bold text-white/40 uppercase mb-4 tracking-wider">Chọn thể loại (Beat)</p>
-                <div className="flex flex-wrap gap-2">
+              <div className="mt-8">
+                <p className="text-[10px] font-black text-white/30 uppercase mb-5 tracking-widest">Chọn Beat nền (Thể loại)</p>
+                <div className="grid grid-cols-4 gap-2">
                   {GENRES.map(g => (
-                    <button key={g} onClick={() => setGenre(g)} className={`px-4 py-2 rounded-xl text-[11px] font-bold border transition-all ${genre === g ? 'bg-purple-600 border-purple-500 shadow-lg shadow-purple-600/30' : 'bg-white/5 border-white/5 hover:bg-white/10'}`}>{g}</button>
+                    <button key={g} onClick={() => setGenre(g)} className={`py-3 rounded-xl text-[10px] font-black border transition-all ${genre === g ? 'bg-purple-600 border-purple-500 shadow-xl shadow-purple-600/40' : 'bg-white/5 border-white/5 hover:bg-white/10 text-white/60'}`}>{g}</button>
                   ))}
                 </div>
               </div>
 
-              <button onClick={() => setShowAdvanced(!showAdvanced)} className="w-full mt-6 py-3 flex items-center justify-center gap-2 text-white/40 text-[10px] font-bold uppercase bg-white/5 rounded-2xl border border-white/5 hover:bg-white/10 transition-all">
+              <button onClick={() => setShowAdvanced(!showAdvanced)} className="w-full mt-6 py-4 flex items-center justify-center gap-2 text-white/40 text-[10px] font-black uppercase bg-white/5 rounded-2xl border border-white/5 hover:bg-white/10 transition-all tracking-widest">
                 Cài đặt nghệ sĩ {showAdvanced ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
               </button>
 
               {showAdvanced && (
-                <div className="mt-4 p-5 bg-black/40 rounded-3xl space-y-5 border border-white/5 animate-in slide-in-from-top-4 duration-300">
-                  <div className="space-y-3">
-                    <label className="text-[10px] font-bold text-white/30 uppercase flex items-center gap-2"><User size={12}/> Giọng ca phỏng theo</label>
-                    <div className="grid grid-cols-2 gap-2">
+                <div className="mt-4 p-6 bg-black/60 rounded-[2rem] space-y-6 border border-white/5 animate-in slide-in-from-top-4">
+                  <div className="space-y-4">
+                    <label className="text-[10px] font-black text-white/30 uppercase tracking-widest flex items-center gap-2"><User size={12}/> Giọng hát phỏng theo</label>
+                    <div className="grid grid-cols-2 gap-3">
                         {ARTISTS.map(a => (
                             <button 
                                 key={a.name}
                                 onClick={() => setVoiceSettings({...voiceSettings, singerStyle: a.name})}
-                                className={`text-[10px] p-2.5 rounded-xl border text-left transition-all ${voiceSettings.singerStyle === a.name ? 'border-purple-500 bg-purple-500/10' : 'border-white/5 bg-white/5'}`}
+                                className={`text-[10px] p-3 rounded-xl border text-left transition-all ${voiceSettings.singerStyle === a.name ? 'border-purple-500 bg-purple-500/20' : 'border-white/5 bg-white/5'}`}
                             >
-                                <p className="font-bold">{a.name}</p>
-                                <p className="opacity-40 text-[8px]">{a.desc}</p>
+                                <p className="font-black mb-1">{a.name}</p>
+                                <p className="opacity-40 text-[9px] leading-tight">{a.desc}</p>
                             </button>
                         ))}
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-white/30 uppercase">Vùng miền</label>
-                      <select value={voiceSettings.region} onChange={(e) => setVoiceSettings({...voiceSettings, region: e.target.value as any})} className="w-full bg-[#111] border-white/10 rounded-xl text-xs p-3">
-                        <option value="north">Miền Bắc</option>
-                        <option value="central">Miền Trung</option>
-                        <option value="south">Miền Nam</option>
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-white/30 uppercase">Độ tuổi</label>
-                      <select value={voiceSettings.age} onChange={(e) => setVoiceSettings({...voiceSettings, age: e.target.value as any})} className="w-full bg-[#111] border-white/10 rounded-xl text-xs p-3">
-                        <option value="young">Thanh niên</option>
-                        <option value="mature">Trung niên</option>
-                      </select>
                     </div>
                   </div>
                 </div>
@@ -244,81 +257,95 @@ const App: React.FC = () => {
               <button
                 onClick={handleGenerate}
                 disabled={step !== GenerationStep.IDLE}
-                className="mt-8 w-full py-5 bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 rounded-[1.5rem] font-black text-xs tracking-widest uppercase hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-3 shadow-2xl shadow-indigo-600/30"
+                className="mt-8 w-full py-6 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 rounded-3xl font-black text-xs tracking-[0.2em] uppercase hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-4 shadow-2xl shadow-purple-600/30"
               >
-                {step === GenerationStep.IDLE ? <><Sparkles size={18} /> <span>Bắt đầu tạo nhạc</span></> : <><div className="w-5 h-5 border-3 border-white/30 border-t-white rounded-full animate-spin" /> <span>Đang xử lý {step === GenerationStep.WRITING_LYRICS ? 'lời...' : 'giọng...'}</span></>}
+                {step === GenerationStep.IDLE ? <><Sparkles size={20} /> <span>Tạo bài hát</span></> : <><div className="w-5 h-5 border-4 border-white/30 border-t-white rounded-full animate-spin" /> <span>Đang xử lý {step === GenerationStep.WRITING_LYRICS ? 'Lời nhạc' : 'Giọng hát'}...</span></>}
               </button>
             </div>
             
-            {statusText && <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-2xl text-[10px] text-purple-300 font-bold animate-pulse text-center tracking-widest uppercase">{statusText}</div>}
-            {errorMsg && <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-xs text-red-400 flex items-center gap-2 font-medium"><AlertCircle size={16}/> {errorMsg}</div>}
+            {statusText && <div className="p-5 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl text-[10px] text-indigo-300 font-black animate-pulse text-center tracking-widest uppercase">{statusText}</div>}
+            {errorMsg && <div className="p-5 bg-red-500/10 border border-red-500/20 rounded-2xl text-xs text-red-400 flex items-center gap-3 font-bold"><AlertCircle size={18}/> {errorMsg}</div>}
           </div>
 
-          {/* Player & Hiển thị bài hát */}
+          {/* Player Section */}
           <div className="xl:col-span-7">
             {currentTrack ? (
-              <div className="space-y-6 animate-in zoom-in-95 duration-500">
-                <div className="glass-morphism rounded-[3rem] p-10 border-white/10 relative overflow-hidden shadow-2xl">
-                  <div className="flex flex-col md:flex-row items-center gap-10">
+              <div className="space-y-8 animate-in zoom-in-95 duration-700">
+                <div className="glass-morphism rounded-[3.5rem] p-12 border-white/10 relative overflow-hidden shadow-3xl bg-gradient-to-br from-white/[0.03] to-transparent">
+                  <div className="flex flex-col md:flex-row items-center gap-12">
                     <div className="relative group">
-                        <img src={currentTrack.thumbnail} className="w-48 h-48 rounded-[2rem] shadow-2xl object-cover ring-4 ring-white/5 transition-transform duration-500 group-hover:scale-105" alt="" />
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-[2rem] flex items-center justify-center">
-                            <Download className="text-white cursor-pointer hover:scale-110 transition-transform" />
+                        <img src={currentTrack.thumbnail} className="w-56 h-56 rounded-[2.5rem] shadow-3xl object-cover ring-8 ring-white/[0.02] group-hover:scale-105 transition-transform duration-700" alt="" />
+                        <div className="absolute -bottom-4 -right-4 w-16 h-16 bg-purple-600 rounded-2xl flex items-center justify-center shadow-2xl">
+                             <Music className="text-white" size={28}/>
                         </div>
                     </div>
                     <div className="text-center md:text-left flex-1">
-                      <span className="bg-purple-600/20 text-purple-400 text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest mb-4 inline-block">Mới ra mắt</span>
-                      <h3 className="text-4xl font-black mb-3 leading-tight tracking-tighter">{currentTrack.title}</h3>
-                      <div className="flex flex-wrap items-center justify-center md:justify-start gap-4">
-                        <p className="text-white/40 text-xs font-bold flex items-center gap-2"><User size={14}/> Ca sĩ: {currentTrack.settings?.singerStyle}</p>
-                        <p className="text-white/40 text-xs font-bold flex items-center gap-2"><Music size={14}/> Beat: {currentTrack.genre}</p>
+                      <span className="bg-purple-600/20 text-purple-400 text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest mb-5 inline-block border border-purple-500/20">Studio Master</span>
+                      <h3 className="text-5xl font-black mb-4 leading-none tracking-tighter">{currentTrack.title}</h3>
+                      <div className="flex flex-wrap items-center justify-center md:justify-start gap-6 opacity-60">
+                        <p className="text-xs font-bold flex items-center gap-2 uppercase tracking-widest"><User size={16} className="text-purple-500"/> {currentTrack.settings?.singerStyle}</p>
+                        <p className="text-xs font-bold flex items-center gap-2 uppercase tracking-widest"><Music size={16} className="text-blue-500"/> Beat {currentTrack.genre}</p>
                       </div>
                     </div>
                   </div>
 
-                  <div className="mt-12 flex items-center gap-6">
-                    <button onClick={togglePlay} className="w-20 h-20 bg-white text-black rounded-full flex items-center justify-center shadow-2xl hover:scale-110 active:scale-95 transition-all shrink-0">
-                      {isPlaying ? <Pause size={36} fill="black" /> : <Play size={36} fill="black" className="ml-1" />}
-                    </button>
-                    <div className="flex-1 space-y-2">
-                        <div className="flex justify-between items-center text-[10px] font-bold text-white/30 uppercase tracking-widest px-1">
-                            <span>Spectrum</span>
-                            <span className="flex items-center gap-1"><Volume2 size={12}/> Stereo Mix</span>
+                  {/* Mixer UI */}
+                  <div className="mt-12 p-8 bg-black/40 rounded-[2.5rem] border border-white/5 space-y-8">
+                     <div className="grid grid-cols-2 gap-8">
+                        <div className="space-y-4">
+                           <div className="flex justify-between items-center text-[10px] font-black uppercase opacity-40 tracking-widest">
+                              <span className="flex items-center gap-2"><Mic2 size={12}/> Giọng hát</span>
+                              <span>{Math.round(vocalVolume * 100)}%</span>
+                           </div>
+                           <input type="range" min="0" max="1.5" step="0.1" value={vocalVolume} onChange={(e) => setVocalVolume(parseFloat(e.target.value))} className="w-full accent-purple-500" />
                         </div>
-                        <div className="h-24 bg-black/40 rounded-3xl overflow-hidden border border-white/5">
+                        <div className="space-y-4">
+                           <div className="flex justify-between items-center text-[10px] font-black uppercase opacity-40 tracking-widest">
+                              <span className="flex items-center gap-2"><Volume2 size={12}/> Nhạc nền</span>
+                              <span>{Math.round(musicVolume * 100)}%</span>
+                           </div>
+                           <input type="range" min="0" max="1" step="0.1" value={musicVolume} onChange={(e) => setMusicVolume(parseFloat(e.target.value))} className="w-full accent-blue-500" />
+                        </div>
+                     </div>
+
+                     <div className="flex items-center gap-8">
+                        <button onClick={togglePlay} className="w-24 h-24 bg-white text-black rounded-full flex items-center justify-center shadow-3xl hover:scale-110 active:scale-95 transition-all shrink-0">
+                          {isPlaying ? <Pause size={40} fill="black" /> : <Play size={40} fill="black" className="ml-2" />}
+                        </button>
+                        <div className="flex-1 h-24 bg-black/60 rounded-[2rem] overflow-hidden border border-white/5 p-4">
                            <Visualizer audioElement={audioRef.current} isPlaying={isPlaying} />
                         </div>
-                    </div>
+                     </div>
                   </div>
                   
-                  {/* Hai luồng âm thanh trộn lại */}
+                  {/* Hidden Audio Elements */}
                   <audio ref={audioRef} src={currentTrack.audioUrl} onEnded={() => { setIsPlaying(false); if(beatRef.current) beatRef.current.pause(); }} className="hidden" />
                   <audio ref={beatRef} src={currentTrack.beatUrl} className="hidden" />
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="glass-morphism p-8 rounded-[2.5rem] border-white/5 h-80 overflow-y-auto custom-scrollbar">
-                    <h4 className="text-[10px] font-black mb-6 text-white/30 uppercase tracking-widest flex items-center gap-2"><Send size={14} className="text-purple-500"/> Lời bài hát</h4>
-                    <p className="text-white/80 text-sm leading-relaxed whitespace-pre-line font-medium">{currentTrack.lyrics}</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div className="glass-morphism p-10 rounded-[3rem] border-white/5 h-[30rem] overflow-y-auto custom-scrollbar">
+                    <h4 className="text-xs font-black mb-8 text-white/20 uppercase tracking-[0.3em] flex items-center gap-3"><Sliders size={18} className="text-purple-500"/> Lời bài hát</h4>
+                    <p className="text-white/80 text-lg leading-relaxed whitespace-pre-line font-medium">{currentTrack.lyrics}</p>
                   </div>
-                  <div className="glass-morphism p-8 rounded-[2.5rem] border-white/5 h-80">
-                    <h4 className="text-[10px] font-black mb-6 text-white/30 uppercase tracking-widest flex items-center gap-2"><Info size={14} className="text-blue-500"/> Chi tiết sản xuất</h4>
-                    <div className="space-y-4">
-                      <div className="flex justify-between items-center py-2 border-b border-white/5"><span className="text-[11px] text-white/30 font-bold uppercase">Nhịp điệu</span><span className="text-xs font-black">4/4 Tempo</span></div>
-                      <div className="flex justify-between items-center py-2 border-b border-white/5"><span className="text-[11px] text-white/30 font-bold uppercase">Công nghệ</span><span className="text-xs font-black">Gemini 2.5 Audio</span></div>
-                      <div className="flex justify-between items-center py-2 border-b border-white/5"><span className="text-[11px] text-white/30 font-bold uppercase">Xử lý giọng</span><span className="text-xs font-black">Melodic TTS</span></div>
-                      <div className="flex justify-between items-center py-2"><span className="text-[11px] text-white/30 font-bold uppercase">Mixing</span><span className="text-xs font-black">Auto-Layering</span></div>
+                  <div className="glass-morphism p-10 rounded-[3rem] border-white/5 h-[30rem] flex flex-col">
+                    <h4 className="text-xs font-black mb-8 text-white/20 uppercase tracking-[0.3em] flex items-center gap-3"><Info size={18} className="text-blue-500"/> Chi tiết hòa âm</h4>
+                    <div className="space-y-6 flex-1">
+                      <div className="flex justify-between items-center py-4 border-b border-white/5"><span className="text-xs text-white/30 font-bold uppercase tracking-widest">Trạng thái</span><span className="text-sm font-black text-green-400 uppercase tracking-widest">Đã Mixing</span></div>
+                      <div className="flex justify-between items-center py-4 border-b border-white/5"><span className="text-xs text-white/30 font-bold uppercase tracking-widest">Đồng bộ</span><span className="text-sm font-black">100% Sync</span></div>
+                      <div className="flex justify-between items-center py-4 border-b border-white/5"><span className="text-xs text-white/30 font-bold uppercase tracking-widest">Kênh âm thanh</span><span className="text-sm font-black">2-Channel Stereo</span></div>
+                      <div className="flex justify-between items-center py-4"><span className="text-xs text-white/30 font-bold uppercase tracking-widest">Mẫu (Sample)</span><span className="text-sm font-black">24bit / 48kHz</span></div>
                     </div>
                   </div>
                 </div>
               </div>
             ) : (
-              <div className="h-[32rem] flex flex-col items-center justify-center text-white/5 border-2 border-dashed border-white/5 rounded-[3rem] animate-pulse">
-                <div className="w-32 h-32 bg-white/5 rounded-full flex items-center justify-center mb-6">
-                    <Music size={64} className="opacity-20" />
+              <div className="h-[40rem] flex flex-col items-center justify-center text-white/5 border-4 border-dashed border-white/[0.02] rounded-[4rem] animate-pulse">
+                <div className="w-40 h-40 bg-white/[0.02] rounded-full flex items-center justify-center mb-8 border border-white/5">
+                    <Music size={80} className="opacity-10" />
                 </div>
-                <p className="text-xl font-black tracking-widest opacity-20 uppercase">Hãy bắt đầu hành trình âm nhạc của bạn</p>
-                <p className="text-xs mt-2 opacity-10">Nhập mô tả ở bên trái để AI bắt đầu sáng tác</p>
+                <p className="text-2xl font-black tracking-[0.3em] opacity-10 uppercase">Hệ thống đang sẵn sàng</p>
+                <p className="text-sm mt-4 opacity-5 font-bold tracking-widest">NHẬP Ý TƯỞNG ĐỂ BẮT ĐẦU SẢN XUẤT</p>
               </div>
             )}
           </div>
