@@ -1,0 +1,7 @@
+{
+  "name": "Melodify AI - Trình Tạo Nhạc Thông Minh",
+  "description": "Ứng dụng tạo lời bài hát và âm thanh chuyên nghiệp sử dụng công nghệ Gemini AI mới nhất, mang lại trải nghiệm giống như Suno AI.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
