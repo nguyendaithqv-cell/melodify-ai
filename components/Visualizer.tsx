@@ -8,22 +8,18 @@ interface VisualizerProps {
 
 const Visualizer: React.FC<VisualizerProps> = ({ audioElement, isPlaying }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  // Fixed: animationRef initialized with null to satisfy the 1-argument requirement for useRef in this environment
   const animationRef = useRef<number | null>(null);
-  const analyzerRef = useRef<AnalyserNode | null>(null);
 
   useEffect(() => {
     if (!audioElement || !canvasRef.current) return;
 
-    // Fixed: Added sampleRate to AudioContext constructor as per Gemini best practices and to ensure a valid object argument
     const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 44100 });
     const source = audioCtx.createMediaElementSource(audioElement);
     const analyzer = audioCtx.createAnalyser();
     
-    analyzer.fftSize = 256;
+    analyzer.fftSize = 128; // Tăng độ nhạy cho Visualizer
     source.connect(analyzer);
     analyzer.connect(audioCtx.destination);
-    analyzerRef.current = analyzer;
 
     const bufferLength = analyzer.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
@@ -37,18 +33,25 @@ const Visualizer: React.FC<VisualizerProps> = ({ audioElement, isPlaying }) => {
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       
-      const barWidth = (canvas.width / bufferLength) * 2.5;
+      const barWidth = (canvas.width / bufferLength) * 1.5;
       let x = 0;
 
       for (let i = 0; i < bufferLength; i++) {
-        const barHeight = (dataArray[i] / 255) * canvas.height;
+        const barHeight = (dataArray[i] / 255) * canvas.height * 0.8;
         
-        // Gradient effect
-        const hue = (i / bufferLength) * 360;
-        ctx.fillStyle = `hsla(${hue}, 100%, 50%, 0.8)`;
+        // Hiệu ứng Gradient từ tím sang xanh
+        const gradient = ctx.createLinearGradient(0, canvas.height, 0, canvas.height - barHeight);
+        gradient.addColorStop(0, '#6366f1'); // Indigo
+        gradient.addColorStop(1, '#a855f7'); // Purple
         
-        ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
-        x += barWidth + 1;
+        ctx.fillStyle = gradient;
+        
+        // Vẽ các thanh bo tròn
+        ctx.beginPath();
+        ctx.roundRect(x, canvas.height - barHeight, barWidth, barHeight, 5);
+        ctx.fill();
+        
+        x += barWidth + 4;
       }
     };
 
@@ -63,9 +66,9 @@ const Visualizer: React.FC<VisualizerProps> = ({ audioElement, isPlaying }) => {
   return (
     <canvas 
       ref={canvasRef} 
-      className="w-full h-32 rounded-lg bg-black/20"
+      className="w-full h-full opacity-80"
       width={600}
-      height={128}
+      height={96}
     />
   );
 };
