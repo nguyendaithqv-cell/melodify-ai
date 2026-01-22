@@ -6,69 +6,62 @@ interface VisualizerProps {
   isPlaying: boolean;
 }
 
-const Visualizer: React.FC<VisualizerProps> = ({ audioElement, isPlaying }) => {
+const Visualizer: React.FC<VisualizerProps> = ({ isPlaying }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!audioElement || !canvasRef.current) return;
+    if (!canvasRef.current || !isPlaying) return;
 
-    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 44100 });
-    const source = audioCtx.createMediaElementSource(audioElement);
-    const analyzer = audioCtx.createAnalyser();
-    
-    analyzer.fftSize = 128; // Tăng độ nhạy cho Visualizer
-    source.connect(analyzer);
-    analyzer.connect(audioCtx.destination);
-
-    const bufferLength = analyzer.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d')!;
+    const bars = 60;
+    const barData = new Array(bars).fill(0).map(() => Math.random() * 50);
 
-    const draw = () => {
-      if (!ctx) return;
-      animationRef.current = requestAnimationFrame(draw);
-      analyzer.getByteFrequencyData(dataArray);
-
+    const animate = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const barWidth = canvas.width / bars;
       
-      const barWidth = (canvas.width / bufferLength) * 1.5;
-      let x = 0;
+      for (let i = 0; i < bars; i++) {
+        // Tạo chuyển động sóng mượt mà
+        if (isPlaying) {
+          barData[i] = Math.max(10, (barData[i] + (Math.random() - 0.5) * 15) % 80);
+        } else {
+          barData[i] *= 0.9;
+        }
 
-      for (let i = 0; i < bufferLength; i++) {
-        const barHeight = (dataArray[i] / 255) * canvas.height * 0.8;
+        const height = barData[i];
+        const x = i * barWidth;
         
-        // Hiệu ứng Gradient từ tím sang xanh
-        const gradient = ctx.createLinearGradient(0, canvas.height, 0, canvas.height - barHeight);
-        gradient.addColorStop(0, '#6366f1'); // Indigo
-        gradient.addColorStop(1, '#a855f7'); // Purple
-        
+        const gradient = ctx.createLinearGradient(0, canvas.height, 0, 0);
+        gradient.addColorStop(0, '#f97316'); // Orange 500
+        gradient.addColorStop(1, '#ef4444'); // Red 500
+
         ctx.fillStyle = gradient;
         
-        // Vẽ các thanh bo tròn
+        // Vẽ thanh bo tròn từ giữa
+        const centerY = canvas.height / 2;
         ctx.beginPath();
-        ctx.roundRect(x, canvas.height - barHeight, barWidth, barHeight, 5);
+        ctx.roundRect(x + 2, centerY - height / 2, barWidth - 4, height, 4);
         ctx.fill();
-        
-        x += barWidth + 4;
       }
+      
+      animationRef.current = requestAnimationFrame(animate);
     };
 
-    draw();
+    animate();
 
     return () => {
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
-      audioCtx.close();
     };
-  }, [audioElement]);
+  }, [isPlaying]);
 
   return (
     <canvas 
       ref={canvasRef} 
-      className="w-full h-full opacity-80"
-      width={600}
-      height={96}
+      className="w-full h-full"
+      width={800}
+      height={100}
     />
   );
 };
