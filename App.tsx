@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Music, Sparkles, Download, Plus, ChevronDown, ChevronUp, User, Info, AlertCircle, Volume2, Mic2, Disc, Waves, Layers } from 'lucide-react';
+import { Play, Pause, Music, Sparkles, Download, Plus, AlertCircle, Volume2, Mic2, Disc, Waves, Layers, Terminal } from 'lucide-react';
 import { generateSongStructure, generateSpeechAudio, pcmToWav } from './services/geminiService';
-import { Track, GenerationStep, VoiceSettings } from './types';
+import { Track, GenerationStep } from './types';
 import Visualizer from './components/Visualizer';
 
 const GENRES = ['Pop', 'Ballad', 'Rock', 'EDM', 'Bolero', 'Lofi', 'Hip-hop', 'Acoustic'];
@@ -20,28 +20,25 @@ const INSTRUMENTAL_BEATS: Record<string, string> = {
 
 const App: React.FC = () => {
   const [prompt, setPrompt] = useState('');
-  const [customLyrics, setCustomLyrics] = useState('');
-  const [useCustomLyrics, setUseCustomLyrics] = useState(false);
   const [genre, setGenre] = useState('Pop');
   const [errorMsg, setErrorMsg] = useState('');
   
-  // Mixer & Audio
   const [vocalVolume, setVocalVolume] = useState(1.0);
-  const [musicVolume, setMusicVolume] = useState(0.5);
-  const [reverbLevel, setReverbLevel] = useState(0.3);
+  const [musicVolume, setMusicVolume] = useState(0.4);
 
   const [tracks, setTracks] = useState<Track[]>([]);
   const [currentTrack, setCurrentTrack] = useState<Track & { beatUrl?: string } | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [step, setStep] = useState<GenerationStep>(GenerationStep.IDLE);
-  const [statusText, setStatusText] = useState('');
+  const [logs, setLogs] = useState<string[]>([]);
   
   const audioContextRef = useRef<AudioContext | null>(null);
   const vocalNodeRef = useRef<AudioBufferSourceNode | null>(null);
   const musicNodeRef = useRef<AudioBufferSourceNode | null>(null);
   const vocalGainRef = useRef<GainNode | null>(null);
   const musicGainRef = useRef<GainNode | null>(null);
-  const reverbNodeRef = useRef<ConvolverNode | null>(null);
+
+  const addLog = (msg: string) => setLogs(prev => [...prev.slice(-4), `> ${msg}`]);
 
   const initAudio = () => {
     if (!audioContextRef.current) {
@@ -50,24 +47,30 @@ const App: React.FC = () => {
   };
 
   const handleGenerate = async () => {
-    if (!useCustomLyrics && !prompt.trim()) return;
+    if (!prompt.trim()) return;
     setErrorMsg('');
     setIsPlaying(false);
     stopPlayback();
+    setLogs([]);
 
     try {
       setStep(GenerationStep.WRITING_LYRICS);
-      setStatusText('Suno AI đang soạn lời nhạc chuyên nghiệp...');
+      addLog("Initializing neural network...");
+      addLog(`Generating ${genre} lyrics for: "${prompt}"`);
       
-      const songData = await generateSongStructure(prompt, genre, useCustomLyrics ? customLyrics : undefined);
+      const songData = await generateSongStructure(prompt, genre);
+      addLog(`Successfully composed: ${songData.title}`);
       
       setStep(GenerationStep.GENERATING_AUDIO);
-      setStatusText(`Đang thu âm giọng ca Native Audio (${genre})...`);
+      addLog("Connecting to Native Audio Studio...");
       
-      const audioBytes = await generateSpeechAudio(songData.lyrics, { region: 'north', age: 'young', voiceName: 'Kore' }, genre);
+      const audioBytes = await generateSpeechAudio(songData.lyrics, genre);
       
-      if (!audioBytes) throw new Error("Lỗi kết nối Studio. Vui lòng thử lại!");
+      if (!audioBytes) {
+          throw new Error("Không thể trích xuất âm thanh từ AI. Hãy thử chọn thể loại khác.");
+      }
 
+      addLog("Audio samples received. Encoding WAV...");
       const pcmData = new Int16Array(audioBytes.buffer);
       const wavBlob = pcmToWav(pcmData, 24000);
       const audioUrl = URL.createObjectURL(wavBlob);
@@ -86,10 +89,10 @@ const App: React.FC = () => {
       setTracks(prev => [newTrack, ...prev]);
       setCurrentTrack(newTrack);
       setStep(GenerationStep.IDLE);
-      setStatusText('');
+      addLog("Production complete. Track ready for playback.");
     } catch (error: any) {
-      console.error("Lỗi:", error);
-      setErrorMsg(error.message || 'Hệ thống đang bận. Vui lòng thử lại.');
+      console.error(error);
+      setErrorMsg(error.message || 'Lỗi không xác định. Vui lòng thử lại.');
       setStep(GenerationStep.IDLE);
     }
   };
@@ -104,7 +107,6 @@ const App: React.FC = () => {
     if (!currentTrack || !currentTrack.audioUrl || !currentTrack.beatUrl) return;
     initAudio();
     const ctx = audioContextRef.current!;
-    
     if (ctx.state === 'suspended') await ctx.resume();
 
     stopPlayback();
@@ -121,20 +123,26 @@ const App: React.FC = () => {
       musicSource.buffer = musicBuf;
       musicSource.loop = true;
 
+      // Compressor để âm thanh hòa quyện
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.setValueAtTime(-24, ctx.currentTime);
+      compressor.knee.setValueAtTime(30, ctx.currentTime);
+      compressor.ratio.setValueAtTime(12, ctx.currentTime);
+      compressor.attack.setValueAtTime(0.003, ctx.currentTime);
+      compressor.release.setValueAtTime(0.25, ctx.currentTime);
+
       const vGain = ctx.createGain();
       const mGain = ctx.createGain();
       vGain.gain.value = vocalVolume;
       mGain.gain.value = musicVolume;
 
-      // Hiệu ứng vang (Reverb giả lập bằng Gain và Delay nhẹ)
-      const reverb = ctx.createGain();
-      reverb.gain.value = reverbLevel;
-
       vocalSource.connect(vGain);
-      vGain.connect(ctx.destination);
+      vGain.connect(compressor);
       
       musicSource.connect(mGain);
-      mGain.connect(ctx.destination);
+      mGain.connect(compressor);
+
+      compressor.connect(ctx.destination);
 
       vocalSource.start(0);
       musicSource.start(0);
@@ -150,8 +158,8 @@ const App: React.FC = () => {
 
       setIsPlaying(true);
     } catch (e) {
-      console.error("Playback error:", e);
-      setErrorMsg("Lỗi phát nhạc. Hãy thử tạo lại.");
+      console.error(e);
+      setErrorMsg("Lỗi khi tải dữ liệu âm thanh.");
     }
   };
 
@@ -161,174 +169,163 @@ const App: React.FC = () => {
   }, [vocalVolume, musicVolume]);
 
   return (
-    <div className="h-screen flex flex-col md:flex-row bg-[#020202] text-white overflow-hidden font-sans">
-      {/* DAW-style Sidebar */}
-      <aside className="hidden md:flex w-80 bg-[#080808] border-r border-white/5 flex-col p-6">
-        <div className="flex items-center gap-4 mb-12">
-          <div className="w-12 h-12 bg-gradient-to-tr from-orange-500 to-red-600 rounded-2xl flex items-center justify-center shadow-xl shadow-red-500/10">
-            <Disc className="w-7 h-7 text-white animate-spin-slow" />
+    <div className="h-screen flex flex-col md:flex-row bg-[#050505] text-white overflow-hidden font-mono">
+      {/* Sidebar Hardware View */}
+      <aside className="hidden md:flex w-72 bg-[#0a0a0a] border-r border-white/10 flex-col p-6 shadow-2xl">
+        <div className="flex items-center gap-3 mb-10 pb-6 border-b border-white/5">
+          <div className="w-10 h-10 bg-orange-600 rounded-lg flex items-center justify-center shadow-lg shadow-orange-600/20">
+            <Disc className="animate-spin-slow" size={20} />
           </div>
-          <div>
-            <h1 className="text-xl font-black tracking-tighter">SUNO <span className="text-orange-500">PRO</span></h1>
-            <p className="text-[9px] opacity-40 uppercase font-bold tracking-[0.2em]">Music Engine v2.5</p>
-          </div>
+          <h1 className="text-lg font-black tracking-tighter">STUDIO <span className="text-orange-600">X</span></h1>
         </div>
 
-        <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar">
-          <p className="text-[10px] text-white/20 font-black uppercase mb-4 tracking-widest px-2">Dự án gần đây</p>
+        <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
+          <p className="text-[9px] text-white/20 font-bold uppercase mb-4 tracking-widest">Library</p>
           {tracks.map(track => (
             <button
               key={track.id}
               onClick={() => setCurrentTrack(track)}
-              className={`w-full flex items-center gap-4 p-4 rounded-2xl transition-all duration-500 group ${
-                currentTrack?.id === track.id ? 'bg-orange-500/10 border border-orange-500/20' : 'hover:bg-white/5 border border-transparent'
+              className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all border ${
+                currentTrack?.id === track.id ? 'bg-orange-600/10 border-orange-600/50' : 'bg-white/[0.02] border-transparent hover:bg-white/5'
               }`}
             >
-              <div className="relative">
-                <img src={track.thumbnail} className="w-12 h-12 rounded-xl object-cover" alt="" />
-                {currentTrack?.id === track.id && isPlaying && <div className="absolute inset-0 bg-orange-500/40 rounded-xl flex items-center justify-center"><Waves className="animate-pulse" size={16}/></div>}
-              </div>
+              <img src={track.thumbnail} className="w-10 h-10 rounded-lg object-cover" alt="" />
               <div className="text-left overflow-hidden">
-                <p className={`font-bold truncate text-sm transition-colors ${currentTrack?.id === track.id ? 'text-orange-500' : 'text-white/80'}`}>{track.title}</p>
-                <p className="text-[10px] text-white/30 uppercase font-black">{track.genre}</p>
+                <p className="text-[11px] font-bold truncate">{track.title}</p>
+                <p className="text-[9px] opacity-30">{track.genre}</p>
               </div>
             </button>
           ))}
-          {tracks.length === 0 && <div className="py-20 text-center opacity-10"><Music size={40} className="mx-auto mb-4"/> <p className="text-xs">Chưa có bản nhạc</p></div>}
         </div>
-
-        <button onClick={() => {setCurrentTrack(null); setPrompt('');}} className="mt-8 py-4 bg-white text-black rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-orange-500 hover:text-white transition-all">
-          <Plus size={18}/> New Project
-        </button>
+        
+        <div className="mt-6 pt-6 border-t border-white/5">
+            <div className="bg-black/50 p-4 rounded-xl border border-white/5 flex items-center gap-3">
+                <div className={`w-2 h-2 rounded-full ${isPlaying ? 'bg-green-500 shadow-[0_0_10px_green]' : 'bg-white/20'}`}></div>
+                <span className="text-[10px] font-bold opacity-40 uppercase tracking-widest">{isPlaying ? 'Output Active' : 'System Idle'}</span>
+            </div>
+        </div>
       </aside>
 
-      {/* Main Studio Workspace */}
-      <main className="flex-1 flex flex-col p-6 md:p-10 overflow-y-auto custom-scrollbar relative">
-        <div className="absolute top-0 left-0 w-full h-1/2 bg-gradient-to-b from-orange-500/5 to-transparent pointer-events-none"></div>
-
-        <header className="mb-12 relative flex justify-between items-center">
-          <div>
-            <h2 className="text-5xl font-black tracking-tighter mb-2">Studio <span className="text-orange-500">Mastering</span></h2>
-            <p className="text-white/30 font-medium">Native Audio AI - Đỉnh cao công nghệ tạo nhạc.</p>
-          </div>
+      {/* Main Rack View */}
+      <main className="flex-1 flex flex-col p-6 md:p-10 overflow-y-auto custom-scrollbar">
+        <header className="mb-10 flex flex-col md:flex-row justify-between items-start md:items-end">
+            <div>
+                <h2 className="text-4xl font-black tracking-tighter uppercase mb-1">Production <span className="text-orange-600">Console</span></h2>
+                <p className="text-white/20 text-xs font-bold uppercase tracking-[0.3em]">Hardware Emulation v3.0</p>
+            </div>
+            {currentTrack && (
+                <button className="mt-4 md:mt-0 flex items-center gap-2 px-6 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full text-[10px] font-black uppercase tracking-widest transition-all"><Download size={14}/> Export Stem</button>
+            )}
         </header>
 
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-10 relative">
-          {/* Creator Console */}
-          <div className="xl:col-span-5 space-y-8">
-            <div className="bg-[#111] rounded-[3rem] p-10 border border-white/5 shadow-2xl">
-              <div className="flex items-center gap-4 mb-8">
-                <div className="w-2 h-2 rounded-full bg-orange-500 animate-pulse"></div>
-                <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40">Composer Console</span>
-              </div>
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
+          {/* Module 1: Input & AI Logs */}
+          <div className="xl:col-span-5 space-y-6">
+            <div className="bg-[#111] border border-white/10 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
+               <div className="absolute top-4 right-6 flex gap-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-red-600 animate-pulse"></div>
+                  <div className="w-1.5 h-1.5 rounded-full bg-orange-600"></div>
+               </div>
+               
+               <p className="text-[10px] font-black text-orange-600/60 uppercase tracking-widest mb-6">Input Matrix</p>
+               
+               <textarea
+                 value={prompt}
+                 onChange={(e) => setPrompt(e.target.value)}
+                 placeholder="Enter song concept here..."
+                 className="w-full bg-black/40 border border-white/5 rounded-2xl p-6 text-sm h-40 focus:border-orange-600/50 outline-none transition-all placeholder:text-white/5"
+               />
 
-              <div className="space-y-6">
-                <textarea
-                  value={useCustomLyrics ? customLyrics : prompt}
-                  onChange={(e) => useCustomLyrics ? setCustomLyrics(e.target.value) : setPrompt(e.target.value)}
-                  placeholder="Mô tả bài hát bạn muốn tạo (ví dụ: Ballad buồn về những chiều mưa Hà Nội...)"
-                  className="w-full bg-black/40 border border-white/5 rounded-[2rem] p-8 text-sm h-48 focus:border-orange-500/50 focus:ring-4 focus:ring-orange-500/5 transition-all resize-none placeholder:text-white/5 font-medium"
-                />
+               <div className="grid grid-cols-4 gap-2 mt-6">
+                 {GENRES.map(g => (
+                   <button key={g} onClick={() => setGenre(g)} className={`py-3 rounded-xl text-[9px] font-black border transition-all ${genre === g ? 'bg-orange-600 border-orange-500 shadow-xl' : 'bg-white/5 border-white/5 hover:bg-white/10 text-white/30'}`}>{g}</button>
+                 ))}
+               </div>
 
-                <div className="grid grid-cols-4 gap-2">
-                  {GENRES.map(g => (
-                    <button key={g} onClick={() => setGenre(g)} className={`py-3 rounded-xl text-[10px] font-black border transition-all ${genre === g ? 'bg-orange-500 border-orange-500 shadow-xl shadow-orange-500/20' : 'bg-white/5 border-white/5 hover:bg-white/10 text-white/40'}`}>{g}</button>
-                  ))}
-                </div>
-
-                <button
-                  onClick={handleGenerate}
-                  disabled={step !== GenerationStep.IDLE}
-                  className="w-full py-6 bg-orange-500 rounded-[2rem] font-black text-xs uppercase tracking-[0.2em] shadow-2xl shadow-orange-500/30 hover:scale-[1.02] active:scale-98 transition-all disabled:opacity-50 flex items-center justify-center gap-4"
-                >
-                  {step === GenerationStep.IDLE ? <><Sparkles size={20}/> <span>Generate Track</span></> : <><div className="w-5 h-5 border-4 border-white/30 border-t-white rounded-full animate-spin"/> <span>Processing...</span></>}
-                </button>
-              </div>
+               <button
+                 onClick={handleGenerate}
+                 disabled={step !== GenerationStep.IDLE}
+                 className="w-full mt-8 py-5 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 rounded-2xl font-black text-xs uppercase tracking-[0.3em] flex items-center justify-center gap-4 transition-all"
+               >
+                 {step === GenerationStep.IDLE ? <><Sparkles size={18}/> Process Track</> : <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>}
+               </button>
             </div>
 
-            {statusText && <div className="p-6 bg-orange-500/10 border border-orange-500/20 rounded-3xl text-[10px] font-black uppercase text-center text-orange-400 tracking-widest animate-pulse">{statusText}</div>}
-            {errorMsg && <div className="p-6 bg-red-500/10 border border-red-500/20 rounded-3xl text-xs font-bold text-red-400 flex items-center gap-3"><AlertCircle size={20}/> {errorMsg}</div>}
+            {/* Terminal View */}
+            <div className="bg-black border border-white/10 rounded-3xl p-6 h-48 flex flex-col">
+                <div className="flex items-center gap-2 mb-4 opacity-30">
+                    <Terminal size={12}/>
+                    <span className="text-[9px] font-black uppercase tracking-widest">AI Status Logs</span>
+                </div>
+                <div className="flex-1 text-[10px] space-y-2 text-green-500/80 font-mono">
+                    {logs.length > 0 ? logs.map((log, i) => <p key={i} className="animate-in fade-in slide-in-from-left-2">{log}</p>) : <p className="opacity-20 italic">Waiting for input signal...</p>}
+                </div>
+            </div>
+            
+            {errorMsg && <div className="bg-red-900/20 border border-red-500/30 p-4 rounded-2xl text-[10px] text-red-400 font-bold flex items-center gap-3 uppercase tracking-widest animate-shake"><AlertCircle size={16}/> {errorMsg}</div>}
           </div>
 
-          {/* Mixing Board */}
+          {/* Module 2: Mastering & Playback */}
           <div className="xl:col-span-7">
             {currentTrack ? (
-              <div className="space-y-8 animate-in fade-in zoom-in duration-700">
-                <div className="bg-[#111] rounded-[4rem] p-12 border border-white/5 shadow-2xl relative overflow-hidden group">
-                  <div className="absolute top-0 right-0 w-64 h-64 bg-orange-500/5 blur-[100px] rounded-full -mr-32 -mt-32"></div>
-                  
-                  <div className="flex flex-col lg:flex-row items-center gap-12 mb-16">
-                    <div className="relative">
-                      <div className={`absolute inset-0 bg-orange-500 blur-2xl opacity-20 transition-opacity duration-1000 ${isPlaying ? 'opacity-40' : 'opacity-10'}`}></div>
-                      <img src={currentTrack.thumbnail} className={`w-64 h-64 rounded-[3rem] object-cover relative z-10 shadow-3xl transition-transform duration-1000 ${isPlaying ? 'scale-105 rotate-2' : ''}`} alt="" />
-                    </div>
-                    <div className="text-center lg:text-left flex-1 z-10">
-                      <div className="flex items-center justify-center lg:justify-start gap-2 mb-6">
-                         <span className="px-4 py-1.5 bg-orange-500 text-black text-[10px] font-black rounded-full uppercase tracking-widest">Mastered</span>
-                         <span className="px-4 py-1.5 bg-white/5 text-white/40 text-[10px] font-black rounded-full uppercase tracking-widest border border-white/5">24-Bit Audio</span>
-                      </div>
-                      <h3 className="text-6xl font-black mb-4 tracking-tighter leading-none">{currentTrack.title}</h3>
-                      <p className="text-white/40 font-black uppercase tracking-widest text-xs flex items-center justify-center lg:justify-start gap-3">
-                        <User size={16} className="text-orange-500"/> Native Vocal • {currentTrack.genre}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="bg-black/60 rounded-[3rem] p-10 border border-white/5 space-y-10">
-                    <div className="grid grid-cols-2 gap-12">
-                       <div className="space-y-4">
-                          <div className="flex justify-between items-center px-2">
-                             <span className="text-[10px] font-black uppercase tracking-widest text-white/30 flex items-center gap-2"><Mic2 size={12}/> Vocal Gain</span>
-                             <span className="text-[10px] font-bold text-orange-500">{Math.round(vocalVolume * 100)}%</span>
-                          </div>
-                          <input type="range" min="0" max="1.5" step="0.01" value={vocalVolume} onChange={(e) => setVocalVolume(parseFloat(e.target.value))} className="w-full h-1.5 bg-white/5 rounded-full appearance-none accent-orange-500 cursor-pointer" />
-                       </div>
-                       <div className="space-y-4">
-                          <div className="flex justify-between items-center px-2">
-                             <span className="text-[10px] font-black uppercase tracking-widest text-white/30 flex items-center gap-2"><Layers size={12}/> Beat Gain</span>
-                             <span className="text-[10px] font-bold text-blue-500">{Math.round(musicVolume * 100)}%</span>
-                          </div>
-                          <input type="range" min="0" max="1" step="0.01" value={musicVolume} onChange={(e) => setMusicVolume(parseFloat(e.target.value))} className="w-full h-1.5 bg-white/5 rounded-full appearance-none accent-blue-500 cursor-pointer" />
-                       </div>
+              <div className="space-y-6 animate-in zoom-in-95">
+                <div className="bg-[#111] border border-white/10 rounded-[3rem] p-10 relative overflow-hidden">
+                    <div className="flex flex-col lg:flex-row gap-10 items-center">
+                        <div className="relative group">
+                            <div className={`absolute -inset-4 bg-orange-600/20 rounded-[3rem] blur-2xl transition-opacity ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
+                            <img src={currentTrack.thumbnail} className={`w-52 h-52 rounded-[2.5rem] relative z-10 border border-white/10 object-cover ${isPlaying ? 'animate-pulse' : ''}`} alt="" />
+                        </div>
+                        <div className="text-center lg:text-left z-10">
+                            <span className="text-[9px] font-black text-orange-500 border border-orange-500/30 px-3 py-1 rounded-full uppercase tracking-[0.2em] mb-4 inline-block">Native Mastering</span>
+                            <h3 className="text-5xl font-black uppercase tracking-tighter leading-none mb-4">{currentTrack.title}</h3>
+                            <div className="flex gap-4 items-center justify-center lg:justify-start opacity-40">
+                                <span className="text-[10px] font-bold flex items-center gap-1"><Mic2 size={12}/> {currentTrack.genre}</span>
+                                <span className="text-[10px] font-bold flex items-center gap-1"><Layers size={12}/> Stereo Mix</span>
+                            </div>
+                        </div>
                     </div>
 
-                    <div className="flex items-center gap-10">
-                       <button onClick={isPlaying ? stopPlayback : playMusic} className="w-28 h-28 bg-orange-500 text-black rounded-full flex items-center justify-center shadow-3xl hover:scale-110 active:scale-95 transition-all shrink-0">
-                          {isPlaying ? <Pause size={48} fill="black" /> : <Play size={48} fill="black" className="ml-2" />}
-                       </button>
-                       <div className="flex-1 h-28 bg-black/40 rounded-[2.5rem] border border-white/5 overflow-hidden p-4">
-                          {isPlaying ? <Visualizer audioElement={null} isPlaying={isPlaying} /> : <div className="h-full flex items-center justify-center opacity-10"><Waves size={40}/></div>}
-                       </div>
+                    <div className="mt-12 bg-black/60 border border-white/5 rounded-[2.5rem] p-8 space-y-8">
+                        <div className="grid grid-cols-2 gap-10">
+                           <div className="space-y-4">
+                              <div className="flex justify-between items-center px-2">
+                                 <span className="text-[9px] font-black uppercase tracking-widest opacity-30">Vocal</span>
+                                 <span className="text-[9px] font-bold text-orange-500">{Math.round(vocalVolume * 100)}%</span>
+                              </div>
+                              <input type="range" min="0" max="1.5" step="0.01" value={vocalVolume} onChange={(e) => setVocalVolume(parseFloat(e.target.value))} className="w-full h-1 bg-white/10 appearance-none accent-orange-500 rounded-full cursor-pointer" />
+                           </div>
+                           <div className="space-y-4">
+                              <div className="flex justify-between items-center px-2">
+                                 <span className="text-[9px] font-black uppercase tracking-widest opacity-30">Instrumental</span>
+                                 <span className="text-[9px] font-bold text-blue-500">{Math.round(musicVolume * 100)}%</span>
+                              </div>
+                              <input type="range" min="0" max="1" step="0.01" value={musicVolume} onChange={(e) => setMusicVolume(parseFloat(e.target.value))} className="w-full h-1 bg-white/10 appearance-none accent-blue-500 rounded-full cursor-pointer" />
+                           </div>
+                        </div>
+
+                        <div className="flex items-center gap-8">
+                           <button onClick={isPlaying ? stopPlayback : playMusic} className="w-24 h-24 bg-orange-600 hover:bg-orange-500 rounded-full flex items-center justify-center shadow-2xl transition-all active:scale-90">
+                              {isPlaying ? <Pause size={40} fill="white" /> : <Play size={40} fill="white" className="ml-2" />}
+                           </button>
+                           <div className="flex-1 h-24 bg-black/40 rounded-3xl border border-white/5 p-4 relative overflow-hidden">
+                              <Visualizer audioElement={null} isPlaying={isPlaying} />
+                           </div>
+                        </div>
                     </div>
-                  </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  <div className="bg-[#111] p-10 rounded-[3rem] border border-white/5 h-[35rem] overflow-y-auto custom-scrollbar">
-                    <h4 className="text-[10px] font-black mb-8 text-white/20 uppercase tracking-[0.4em]">Lyrics Metadata</h4>
-                    <p className="text-white/80 text-xl leading-[1.8] font-medium whitespace-pre-line">{currentTrack.lyrics}</p>
-                  </div>
-                  <div className="bg-[#111] p-10 rounded-[3rem] border border-white/5 h-[35rem] flex flex-col">
-                    <h4 className="text-[10px] font-black mb-8 text-white/20 uppercase tracking-[0.4em]">Studio Specs</h4>
-                    <div className="space-y-8 flex-1">
-                      <div className="flex justify-between items-center py-5 border-b border-white/5"><span className="text-[11px] text-white/30 font-bold uppercase">Processing</span><span className="text-xs font-black text-orange-500 uppercase tracking-widest">Gemini 2.5 Native</span></div>
-                      <div className="flex justify-between items-center py-5 border-b border-white/5"><span className="text-[11px] text-white/30 font-bold uppercase">Audio Quality</span><span className="text-xs font-black">48kHz / Stereo</span></div>
-                      <div className="flex justify-between items-center py-5 border-b border-white/5"><span className="text-[11px] text-white/30 font-bold uppercase">Mixing Status</span><span className="text-xs font-black text-green-500 uppercase">Balanced</span></div>
-                      <div className="flex justify-between items-center py-5"><span className="text-[11px] text-white/30 font-bold uppercase">Latency</span><span className="text-xs font-black">Ultra-Low</span></div>
-                      
-                      <div className="mt-10 p-6 bg-black rounded-3xl border border-white/5">
-                        <p className="text-[9px] font-black text-white/20 uppercase mb-4 text-center">Export Track</p>
-                        <button className="w-full py-4 bg-white/5 hover:bg-white/10 rounded-2xl flex items-center justify-center gap-2 text-xs font-bold transition-all border border-white/5"><Download size={16}/> Download MP3</button>
-                      </div>
-                    </div>
-                  </div>
+                <div className="bg-[#111] border border-white/10 rounded-[3rem] p-10 h-80 overflow-y-auto custom-scrollbar">
+                    <p className="text-[9px] font-black opacity-20 uppercase tracking-[0.4em] mb-8">Metadata / Lyrics</p>
+                    <p className="text-white/70 text-lg font-medium leading-relaxed whitespace-pre-line italic">
+                        {currentTrack.lyrics}
+                    </p>
                 </div>
               </div>
             ) : (
-              <div className="h-[45rem] bg-[#080808] border-4 border-dashed border-white/[0.02] rounded-[5rem] flex flex-col items-center justify-center animate-pulse">
-                <Disc size={120} className="text-white/5 mb-10" />
-                <p className="text-3xl font-black text-white/10 uppercase tracking-[0.4em]">Studio Offline</p>
-                <p className="text-xs mt-4 text-white/5 font-bold uppercase tracking-widest">Nhập ý tưởng để kích hoạt bộ xử lý âm thanh</p>
+              <div className="h-[45rem] bg-[#0a0a0a] border-4 border-dashed border-white/[0.03] rounded-[4rem] flex flex-col items-center justify-center text-white/5">
+                <Layers size={100} />
+                <p className="text-xl font-black uppercase tracking-[0.4em] mt-8">Studio Mainframe Offline</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest mt-2">Initialize process to start</p>
               </div>
             )}
           </div>
@@ -341,16 +338,16 @@ const App: React.FC = () => {
           to { transform: rotate(360deg); }
         }
         .animate-spin-slow {
-          animation: spin-slow 12s linear infinite;
+          animation: spin-slow 8s linear infinite;
         }
-        input[type='range']::-webkit-slider-thumb {
-          appearance: none;
-          width: 16px;
-          height: 16px;
-          background: white;
-          border-radius: 50%;
-          cursor: pointer;
-          border: 3px solid currentColor;
+        @keyframes shake {
+          0%, 100% { transform: translateX(0); }
+          25% { transform: translateX(-5px); }
+          75% { transform: translateX(5px); }
+        }
+        .animate-shake {
+          animation: shake 0.2s ease-in-out infinite;
+          animation-iteration-count: 2;
         }
       `}} />
     </div>
