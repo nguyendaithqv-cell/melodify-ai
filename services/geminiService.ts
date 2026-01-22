@@ -14,10 +14,10 @@ export const generateSongStructure = async (
   const ai = new GoogleGenAI({ apiKey });
   
   const instruction = customLyrics 
-    ? `Dựa trên lời bài hát: "${customLyrics}", hãy phân tích cảm xúc và đặt tiêu đề phù hợp với thể loại "${genre}".`
+    ? `Dựa trên lời bài hát: "${customLyrics}", hãy phân tích cảm xúc và đặt tiêu đề phù hợp với thể loại "${genre}". Trả về JSON.`
     : `Hãy viết lời bài hát chủ đề: "${prompt}", thể loại: "${genre}". 
-       YÊU CẦU: Chia rõ [Verse 1], [Chorus], [Verse 2], [Bridge], [Outro]. 
-       Mỗi câu hát phải có số âm tiết cân đối. Trả về JSON.`;
+       YÊU CẦU: Chia rõ [Verse], [Chorus], [Bridge]. 
+       Mỗi câu hát phải có nhịp điệu. Trả về JSON.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -40,7 +40,7 @@ export const generateSongStructure = async (
     });
 
     const result = response.text;
-    if (!result) throw new Error("AI không phản hồi.");
+    if (!result) throw new Error("AI không phản hồi lời bài hát.");
     
     const parsed = JSON.parse(result);
     if (customLyrics) parsed.lyrics = customLyrics;
@@ -54,7 +54,6 @@ export const generateSongStructure = async (
 
 export const generateSpeechAudio = async (
   text: string, 
-  settings: VoiceSettings,
   genre: string
 ): Promise<Uint8Array | null> => {
   // @ts-ignore
@@ -63,45 +62,49 @@ export const generateSpeechAudio = async (
 
   const ai = new GoogleGenAI({ apiKey });
   
-  // Sử dụng model Native Audio để có khả năng "hát" tốt hơn
-  const prompt = `Bạn là một ca sĩ chuyên nghiệp phong cách ${genre}. 
-    HÃY HÁT (SING) lời bài hát này một cách đầy cảm xúc, có nhịp điệu mạnh mẽ, 
-    ngân nga và luyến láy ở những đoạn điệp khúc.
-    YÊU CẦU: Không được đọc như robot, phải có cao độ và ngắt nghỉ như đang biểu diễn trên sân khấu.
+  // Prompt yêu cầu model Gemini hất/đọc theo giai điệu
+  const prompt = `Hãy đóng vai một ca sĩ chuyên nghiệp thể loại ${genre}. 
+    HÃY HÁT thật truyền cảm lời bài hát sau đây. 
+    Lưu ý: Ngắt nghỉ đúng nhịp điệu, có luyến láy và biểu cảm:
     
-    LỜI BÀI HÁT:
-    ${text.substring(0, 1000)}`;
+    ${text.substring(0, 500)}`;
 
   try {
+    // QUAN TRỌNG: Phải có responseModalities để model trả về Audio
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-native-audio-preview-12-2025',
       contents: [{ parts: [{ text: prompt }] }],
+      config: {
+        // @ts-ignore
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: 'Kore' } // 'Kore' hoặc 'Puck' thường có tông giọng tốt
+            }
+        }
+      }
     });
 
-    // Trích xuất dữ liệu âm thanh từ response parts
-    let audioData: string | undefined;
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData && part.inlineData.mimeType.includes('audio')) {
-        audioData = part.inlineData.data;
-        break;
-      }
+    // Trích xuất dữ liệu âm thanh
+    const part = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
+    if (!part || !part.inlineData) {
+        console.warn("Model không trả về dữ liệu audio trực tiếp, thử lấy từ text (nếu có)");
+        return null;
     }
 
-    if (!audioData) return null;
-
-    const binaryString = atob(audioData);
+    const binaryString = atob(part.inlineData.data);
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
       bytes[i] = binaryString.charCodeAt(i);
     }
     return bytes;
   } catch (error) {
-    console.error("Lỗi tạo âm thanh (Native Audio):", error);
+    console.error("Lỗi nghiêm trọng trong generateSpeechAudio:", error);
     return null;
   }
 };
 
-// Hàm chuyển đổi PCM sang WAV chuẩn
+// Hàm chuyển đổi PCM (thường là 24kHz từ Gemini) sang WAV
 export const pcmToWav = (pcmData: Int16Array, sampleRate: number): Blob => {
   const buffer = new ArrayBuffer(44 + pcmData.length * 2);
   const view = new DataView(buffer);
@@ -120,16 +123,14 @@ export const pcmToWav = (pcmData: Int16Array, sampleRate: number): Blob => {
   view.setUint16(20, 1, true); // PCM
   view.setUint16(22, 1, true); // Mono
   view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true); // byte rate
-  view.setUint16(32, 2, true); // block align
-  view.setUint16(34, 16, true); // bits per sample
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
   writeString(36, 'data');
   view.setUint32(40, pcmData.length * 2, true);
 
-  let offset = 44;
-  for (let i = 0; i < pcmData.length; i++) {
+  for (let i = 0, offset = 44; i < pcmData.length; i++, offset += 2) {
     view.setInt16(offset, pcmData[i], true);
-    offset += 2;
   }
 
   return new Blob([view], { type: 'audio/wav' });
