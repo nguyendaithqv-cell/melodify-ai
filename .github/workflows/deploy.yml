@@ -21,7 +21,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
+          # Đã xóa dòng cache: 'npm' để tránh lỗi bạn gặp phải
 
       - name: Install dependencies
         run: npm install
@@ -29,7 +29,6 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          # Truyền API Key vào quá trình build nếu cần
           API_KEY: ${{ secrets.API_KEY }}
 
       - name: Setup Pages
