@@ -23,8 +23,9 @@ export const generateSongStructure = async (
   genre: string, 
   customLyrics?: string
 ): Promise<SongMetadata> => {
+  // @ts-ignore
   const apiKey = process.env.API_KEY;
-  if (!apiKey) throw new Error("Chưa cấu hình API_KEY trong GitHub Secrets!");
+  if (!apiKey) throw new Error("Chưa cấu hình API_KEY! Hãy kiểm tra GitHub Secrets.");
 
   const ai = new GoogleGenAI({ apiKey });
   
@@ -53,7 +54,7 @@ export const generateSongStructure = async (
     });
 
     const result = response.text;
-    if (!result) throw new Error("AI không phản hồi lời bài hát.");
+    if (!result) throw new Error("AI không phản hồi.");
     
     const parsed = JSON.parse(result);
     if (customLyrics) parsed.lyrics = customLyrics;
@@ -69,6 +70,7 @@ export const generateSpeechAudio = async (
   text: string, 
   settings: VoiceSettings
 ): Promise<Uint8Array | null> => {
+  // @ts-ignore
   const apiKey = process.env.API_KEY;
   if (!apiKey) return null;
 
@@ -80,7 +82,7 @@ export const generateSpeechAudio = async (
   
   const prompt = `Thể hiện lời bài hát sau bằng giọng ${regionMap[settings.region]}, độ tuổi ${ageMap[settings.age]}. 
     ${settings.singerStyle !== 'Không có' ? `Phong cách: ${settings.singerStyle} (${artistDesc}).` : ''}
-    Lời: ${text.substring(0, 1000)}`; // Giới hạn độ dài để ổn định
+    Lời: ${text.substring(0, 1000)}`;
 
   try {
     const response = await ai.models.generateContent({
